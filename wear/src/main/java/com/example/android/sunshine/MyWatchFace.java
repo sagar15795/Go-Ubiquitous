@@ -20,12 +20,16 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.content.res.Resources;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.Typeface;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
@@ -78,6 +82,7 @@ public class MyWatchFace extends CanvasWatchFaceService {
     private static final String KEY_HIGH = "high_temp";
     private static final String KEY_LOW = "low_temp";
     private static final String KEY_ID = "weather_id";
+
     private String mHighTemp;
     private String mLowTemp;
     private int mWeatherId;
@@ -110,11 +115,18 @@ public class MyWatchFace extends CanvasWatchFaceService {
 
     private class Engine extends CanvasWatchFaceService.Engine implements
             GoogleApiClient.ConnectionCallbacks,GoogleApiClient.OnConnectionFailedListener,DataApi.DataListener{
+
+        Context context = getApplicationContext();
+        SharedPreferences sharedPref = context.getSharedPreferences(
+                getString(R.string.preference_file_key), Context.MODE_PRIVATE);
+
         final Handler mUpdateTimeHandler = new EngineHandler(this);
         boolean mRegisteredTimeZoneReceiver = false;
         Paint mBackgroundPaint;
         Paint mTextTimePaint;
         Paint mTextDatePaint;
+        Paint mTextTempLowPaint;
+        Paint mTextTempHighPaint;
         boolean mAmbient;
         Calendar mCalendar;
         final BroadcastReceiver mTimeZoneReceiver = new BroadcastReceiver() {
@@ -129,6 +141,8 @@ public class MyWatchFace extends CanvasWatchFaceService {
         float mXOffsetDate;
         float mYOffsetTime;
         float mYOffsetDate;
+        float mYOffsetDivider;
+        float mYOffsetWeather;
 
         /**
          * Whether the display supports fewer bits for each color in ambient mode. When true, we
@@ -139,6 +153,10 @@ public class MyWatchFace extends CanvasWatchFaceService {
         @Override
         public void onCreate(SurfaceHolder holder) {
             super.onCreate(holder);
+
+            mHighTemp = sharedPref.getString(KEY_HIGH, null);
+            mLowTemp = sharedPref.getString(KEY_LOW,null);
+            mWeatherId = sharedPref.getInt(KEY_ID, 0);
 
             setWatchFaceStyle(new WatchFaceStyle.Builder(MyWatchFace.this)
                     .setCardPeekMode(WatchFaceStyle.PEEK_MODE_VARIABLE)
@@ -163,8 +181,18 @@ public class MyWatchFace extends CanvasWatchFaceService {
             mTextDatePaint = new Paint();
             mTextDatePaint = createTextDatePaint(resources.getColor(R.color.primary_light));
 
+            mTextTempLowPaint = new Paint();
+            mTextTempLowPaint = createTextTempPaint(resources.getColor(R.color.primary_light));
+
+            mTextTempHighPaint = new Paint();
+            mTextTempHighPaint = createTextTempPaint(resources.getColor(R.color.digital_text));
+
+
             mYOffsetTime = resources.getDimension(R.dimen.digital_y_offset_time);
             mYOffsetDate = resources.getDimension(R.dimen.digital_y_offset_date);
+
+            mYOffsetDivider = resources.getDimension(R.dimen.y_offset_divider);
+            mYOffsetWeather = resources.getDimension(R.dimen.y_offset_weather);
 
             mXOffsetTime = mTextTimePaint.measureText("12:00") / 2;
             mXOffsetDate = mTextDatePaint.measureText("WED, JUN 13 2016") / 2;
@@ -193,6 +221,15 @@ public class MyWatchFace extends CanvasWatchFaceService {
             paint.setTypeface(NORMAL_TYPEFACE);
             paint.setAntiAlias(true);
             paint.setTextSize(getResources().getDimension(R.dimen.digital_date_text_size));
+            return paint;
+        }
+
+        private Paint createTextTempPaint(int textColor) {
+            Paint paint = new Paint();
+            paint.setColor(textColor);
+            paint.setTypeface(NORMAL_TYPEFACE);
+            paint.setAntiAlias(true);
+            paint.setTextSize(getResources().getDimension(R.dimen.digital_temp_text_size));
             return paint;
         }
 
@@ -259,9 +296,6 @@ public class MyWatchFace extends CanvasWatchFaceService {
             super.onAmbientModeChanged(inAmbientMode);
             if (mAmbient != inAmbientMode) {
                 mAmbient = inAmbientMode;
-                if (mLowBitAmbient) {
-                    mTextTimePaint.setAntiAlias(!inAmbientMode);
-                }
                 invalidate();
             }
 
@@ -270,7 +304,7 @@ public class MyWatchFace extends CanvasWatchFaceService {
             updateTimer();
         }
 
-      
+
 
         @Override
         public void onDraw(Canvas canvas, Rect bounds) {
@@ -301,6 +335,36 @@ public class MyWatchFace extends CanvasWatchFaceService {
             int year = mCalendar.get(Calendar.YEAR);
             String dateText = String.format("%s, %s %d %d", dayName.toUpperCase(), monthName.toUpperCase(), dayOfMonth, year);
             canvas.drawText(dateText, bounds.centerX() - mXOffsetDate, mYOffsetDate, mTextDatePaint);
+
+            // draw line and max, min temp
+            if (mHighTemp != null && mLowTemp != null) {
+
+                canvas.drawLine(bounds.centerX() - 25, mYOffsetDivider, bounds.centerX() + 25, mYOffsetDivider, mTextDatePaint);
+
+                float highTextSize = mTextTempHighPaint.measureText(mHighTemp);
+                if (mAmbient) {
+                    mTextTempLowPaint.setColor(ContextCompat.getColor(getApplicationContext(),R.color.digital_text));
+                    float lowTextSize = mTextTempLowPaint.measureText(mLowTemp);
+                    float xOffset = bounds.centerX() - ((highTextSize + lowTextSize + 20) / 2);
+                    canvas.drawText(mHighTemp, xOffset, mYOffsetWeather, mTextTempHighPaint);
+                    canvas.drawText(mLowTemp, xOffset + highTextSize + 20, mYOffsetWeather, mTextTempLowPaint);
+                } else {
+                    mTextTempLowPaint.setColor(ContextCompat.getColor(getApplicationContext(),R
+                            .color.primary_light));
+                    float xOffset = bounds.centerX() - (highTextSize / 2);
+                    canvas.drawText(mHighTemp, xOffset, mYOffsetWeather, mTextTempHighPaint);
+                    canvas.drawText(mLowTemp, bounds.centerX() + (highTextSize / 2),
+                            mYOffsetWeather, mTextTempLowPaint);
+
+                    Drawable b = Utility.getIconResourceForWeatherCondition(getApplicationContext(),mWeatherId);
+                    Bitmap icon = ((BitmapDrawable) b).getBitmap();
+                    float scaledWidth = (mTextTempHighPaint.getTextSize() / icon.getHeight()) * icon.getWidth();
+                    Bitmap weatherIcon = Bitmap.createScaledBitmap(icon, (int) scaledWidth, (int) mTextTempHighPaint.getTextSize(), true);
+                    float iconXOffset = bounds.centerX() - ((highTextSize / 2) + weatherIcon.getWidth() + 30);
+                    canvas.drawBitmap(weatherIcon, iconXOffset, mYOffsetWeather - weatherIcon
+                            .getHeight()+10, null);
+                }
+            }
         }
 
         /**
@@ -359,9 +423,16 @@ public class MyWatchFace extends CanvasWatchFaceService {
                     DataItem dataItem = dataEvent.getDataItem();
                     if (dataItem.getUri().getPath().compareTo(PATH_WEATHER) == 0) {
                         DataMap dataMap = DataMapItem.fromDataItem(dataItem).getDataMap();
+                        SharedPreferences.Editor editor = sharedPref.edit();
+                        editor.putString(KEY_HIGH, dataMap.getString(KEY_HIGH));
+                        editor.putString(KEY_LOW, dataMap.getString(KEY_LOW));
+                        editor.putInt(KEY_ID, dataMap.getInt(KEY_ID));
+                        editor.apply();
+
                         mHighTemp = dataMap.getString(KEY_HIGH);
                         mLowTemp = dataMap.getString(KEY_LOW);
                         mWeatherId = dataMap.getInt(KEY_ID);
+
                         Log.d("WATCH_DATA", "\nHigh: " + mHighTemp + "\nLow: " + mLowTemp + "\nID: " + mWeatherId);
                         invalidate();
                     }
